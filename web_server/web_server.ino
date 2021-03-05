@@ -1,4 +1,7 @@
+#include <Arduino.h>
 #include <ESP8266WiFi.h> //ESP8266 Arduino library with built in functions
+#include "fauxmoESP.h"
+
 
 #define ssid "USSR24" // Replace with your network name
 #define password "Nirishka2@" // Replace with your network password
@@ -11,6 +14,11 @@ int RELAY = 0;
 #define RELAY_ON()  digitalWrite(RELAY, LOW);
 #define RELAY_OFF() digitalWrite(RELAY, HIGH);
 
+
+#define LAMP_1 "garage lamp"
+
+fauxmoESP fauxmo;
+
 void setup() { // only executes once
 
     Serial.begin(115200); // Initializing serial port
@@ -21,6 +29,8 @@ void setup() { // only executes once
     Serial.println();
     Serial.print("Connecting to ");
     Serial.println(ssid);
+    
+  WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password); // Connecting to WiFi network
     while (WiFi.status() != WL_CONNECTED)
     {
@@ -29,6 +39,44 @@ void setup() { // only executes once
     }
     Serial.println("");
     Serial.println("WiFi connected");
+
+    // By default, fauxmoESP creates it's own webserver on the defined port
+  // The TCP port must be 80 for gen3 devices (default is 1901)
+  // This has to be done before the call to enable()
+  fauxmo.createServer(true); // not needed, this is the default value
+  fauxmo.setPort(80); // This is required for gen3 devices
+
+  // You have to call enable(true) once you have a WiFi connection
+  // You can enable or disable the library at any moment
+  // Disabling it will prevent the devices from being discovered and switched
+  fauxmo.enable(true);
+  // You can use different ways to invoke alexa to modify the devices state:
+  // "Alexa, turn lamp two on"
+
+  // Add virtual devices
+  fauxmo.addDevice(LAMP_1);
+
+fauxmo.onSetState([](unsigned char device_id, const char * device_name, bool state, unsigned char value) {
+    // Callback when a command from Alexa is received. 
+    // You can use device_id or device_name to choose the element to perform an action onto (relay, LED,...)
+    // State is a boolean (ON/OFF) and value a number from 0 to 255 (if you say "set kitchen light to 50%" you will receive a 128 here).
+    // Just remember not to delay too much here, this is a callback, exit as soon as possible.
+    // If you have to do something more involved here set a flag and process it in your main loop.
+        
+    Serial.printf("[MAIN] Device #%d (%s) state: %s value: %d\n", device_id, device_name, state ? "ON" : "OFF", value);
+    if ( (strcmp(device_name, LAMP_1) == 0) ) {
+      // this just sets a variable that the main loop() does something about
+      Serial.println("RELAY 1 switched by Alexa");
+      //digitalWrite(RELAY_PIN_1, !digitalRead(RELAY_PIN_1));
+      if (state) {
+        RELAY_ON();
+      } else {
+        RELAY_OFF();
+      }
+    }
+
+  });
+        
     
     server.begin(); // Starting the web server
     Serial.println("Web server Initiated. Waiting for the ESP IP...");
@@ -39,6 +87,10 @@ void setup() { // only executes once
 
 // runs over and over again
 void loop() {
+  // fauxmoESP uses an async TCP server but a sync UDP server
+  // Therefore, we have to manually poll for UDP packets
+  fauxmo.handle();
+  
     // Searching for new clients
     WiFiClient client = server.available();
     
